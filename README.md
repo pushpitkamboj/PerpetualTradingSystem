@@ -6,7 +6,7 @@ The complete local runtime is managed with Docker Compose. There is no separate 
 
 ## Architecture
 
-![Python Perps architecture](docs/architecture.svg)
+![Python Perps architecture](docs/architecture.png)
 
 ## Services
 
