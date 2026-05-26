@@ -2,7 +2,7 @@
 
 A small perpetuals exchange backend built with FastAPI, Redis streams, background FastStream services, and SQLAlchemy persistence.
 
-The complete local runtime is managed with Docker Compose. There is no separate worker service in this project.
+The complete local runtime is managed with Docker Compose. 
 
 ## Architecture
 
