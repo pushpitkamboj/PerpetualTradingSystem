@@ -1,0 +1,73 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: python_cex_db
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: python_cex_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+  
+  fastapi:
+    build:
+      context: .
+      dockerfile: app/services/backend_service/Dockerfile
+    env_file:
+      - .env
+    environment:
+      REDIS_SERVER_URL: redis://redis:6379
+    depends_on:
+      - postgres
+      - redis
+    ports:
+      - "8000:8000"
+
+  binance:
+    build:
+      context: .
+      dockerfile: app/services/binance_service/Dockerfile
+    env_file:
+      - .env
+    environment:
+      REDIS_SERVER_URL: redis://redis:6379
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  orderbook:
+    build:
+      context: .
+      dockerfile: app/services/order_book_service/Dockerfile
+    depends_on:
+      - redis
+    network_mode: "service:redis"
+    restart: unless-stopped
+
+  db_ingestor:
+    build:
+      context: .
+      dockerfile: app/services/db_ingestor_service/Dockerfile
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - postgres
+    network_mode: "service:redis"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
