@@ -214,6 +214,31 @@ async def publish_orderbook_update(market: MARKET):
     )
 
 
+def _build_position_create_payload(user_id: str, order_id: str, market: MARKET, fill_ids: list[str]):
+    position = position_by_user.get(user_id, {}).get(market)
+    return PositionCreatePayload(
+        user_id=user_id,
+        order_id=order_id,
+        market=market,
+        status=orders[order_id].status,
+        remaining_qty=orders[order_id].qty,
+        fills=[fills[fill_id] for fill_id in fill_ids],
+        position=position.model_dump() if position else None,
+    )
+
+
+async def publish_position_create(payload: PositionCreatePayload):
+    message = PositionCreateData(
+        event_type="create_position",
+        payload=payload
+    )
+    await broker.publish(
+        message=message,
+        stream=STREAM_PERPS_UPDATES,
+        correlation_id=str(uuid4())
+    )
+
+
 #CREATE ENGINE OF POST ORDER
 # all engine entrypoints run inside the Celery worker so state is mutated
 # by exactly one process at a time. args/results cross the wire as JSON,
@@ -225,9 +250,13 @@ async def create_order_engine(current_order: OrderCreatePayload):
         }
     orders[current_order.order_id] = current_order # place the order before validation helpers read it
     update_collateral(current_order.user_id, current_order.margin)
+    matched_fill_ids: list[str] = []
+    matched_order_ids: set[str] = set()
 
     while current_order_possible(current_order.order_id):
        fill_current = execute_current_order(current_order.order_id)
+       matched_fill_ids.append(fill_current.fill_id)
+       matched_order_ids.add(fill_current.taker_order_id)
        position_of_current_user = position_by_user.get(fill_current.maker_user_id, {}).get(current_order.market)
        position_of_swapped_user = position_by_user.get(fill_current.taker_user_id, {}).get(current_order.market)
        swapped_order_side = "long" if current_order.side == "short" else "short"
@@ -240,23 +269,26 @@ async def create_order_engine(current_order: OrderCreatePayload):
     if current_order_after_execution.status != "filled": # NO MATCH FOUND, STILL NOT FILLED, PUT IN ORDER BOOK
        place_order_on_orderbook(current_order_after_execution.order_id)
     await publish_orderbook_update(current_order.market) #PUBLISH EVENT
-    payload = PositionCreatePayload(
+    payload = _build_position_create_payload(
         user_id=current_order.user_id,
         order_id=current_order_after_execution.order_id,
         market=current_order.market,
-        status=current_order_after_execution.status,
-        remaining_qty=current_order_after_execution.qty,
-        fills=[fills[fill_id].model_dump() for fill_id in fills if fills[fill_id].maker_order_id == current_order.order_id],
-        position=position_by_user.get(current_order.user_id,{}).get(current_order.market).model_dump() if position_by_user.get(current_order.user_id,{}).get(current_order.market) else None #to send the updated position after order execution which can be used to update the frontend
+        fill_ids=matched_fill_ids,
     )
-    message = PositionCreateData(
-        event_type = "create_position",
-        payload=payload
-    )
-    await broker.publish(
-        message=message,
-        stream=STREAM_PERPS_UPDATES,
-        correlation_id=str(uuid4())
-    )
-    return message #dosent mean anything, only for testing
+    await publish_position_create(payload)
+
+    for matched_order_id in matched_order_ids:
+        matched_order = orders[matched_order_id]
+        matched_payload = _build_position_create_payload(
+            user_id=matched_order.user_id,
+            order_id=matched_order_id,
+            market=matched_order.market,
+            fill_ids=[
+                fill_id
+                for fill_id in matched_fill_ids
+                if fills[fill_id].taker_order_id == matched_order_id
+            ],
+        )
+        await publish_position_create(matched_payload)
+    return payload # useful in tests/debugging
     
