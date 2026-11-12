@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
-import os
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from faststream.redis import RedisBroker
 from packages.db import init_db, close_db
@@ -17,7 +17,10 @@ from packages.common_utils import (
 )
 from pydantic import Field
 from typing import Annotated, Union
-broker = RedisBroker(os.getenv("REDIS_SERVER_URL", "redis://localhost:6379"))
+from settings import Settings, get_settings
+
+settings = get_settings()
+broker = RedisBroker(settings.redis_server_url)
 from routers.stream_response import (
     create_position,
     binance_data,
@@ -39,15 +42,37 @@ async def lifespan(_app: FastAPI):
 
     print("Shutdown code here")
 
-app = FastAPI(lifespan=lifespan)
-
 from routers.auth import router as auth_router
 from routers.exchange import router as exchange_router
 from routers.ws import router as ws_router
 
-app.include_router(auth_router)
-app.include_router(exchange_router)
-app.include_router(ws_router)
+def create_app(app_settings: Settings | None = None) -> FastAPI:
+    app_settings = app_settings or settings
+
+    app = FastAPI(lifespan=lifespan)
+
+    cors_kwargs = {
+        "allow_origins": app_settings.cors_allow_origins,
+        "allow_credentials": True,
+        "allow_methods": ["*"],
+        "allow_headers": ["*"],
+    }
+    if app_settings.cors_allow_origin_regex:
+        cors_kwargs["allow_origin_regex"] = app_settings.cors_allow_origin_regex
+
+    app.add_middleware(CORSMiddleware, **cors_kwargs)
+
+    @app.get("/healthz", include_in_schema=False)
+    async def healthcheck():
+        return {"status": "ok"}
+
+    app.include_router(auth_router)
+    app.include_router(exchange_router)
+    app.include_router(ws_router)
+    return app
+
+
+app = create_app()
 
 PerpsUpdatesEvent = Annotated[
     Union[

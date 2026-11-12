@@ -1,0 +1,123 @@
+# Hostinger Docker Manager stack. The same repository ref is used for each
+# service so Docker can build each service from its checked-in Dockerfile.
+x-source-context: &source-context
+  context: https://github.com/pushpitkamboj/CENTRALIZED_PERPETUALS_EXCHANGE.git#perps-hostinger-deploy-20261112
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  fastapi:
+    build:
+      <<: *source-context
+      dockerfile: app/services/backend_service/Dockerfile
+    restart: unless-stopped
+    environment:
+      REDIS_SERVER_URL: redis://redis:6379
+      DATABASE_URL: sqlite+aiosqlite:////data/python_perps.db
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in the Hostinger project environment}
+      DEMO_WALLET_BALANCE: ${DEMO_WALLET_BALANCE:-10000}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-https://perpetual-trading-system.pushpitkamboj.com}
+      CORS_ALLOW_ORIGIN_REGEX: ""
+    volumes:
+      - db_data:/data
+    expose:
+      - "8000"
+    networks:
+      default: {}
+      vps_proxy:
+        aliases:
+          - python-perps-fastapi
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2)
+      interval: 10s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
+
+  binance:
+    build:
+      <<: *source-context
+      dockerfile: app/services/binance_service/Dockerfile
+    restart: unless-stopped
+    environment:
+      REDIS_SERVER_URL: redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  orderbook:
+    build:
+      <<: *source-context
+      dockerfile: app/services/order_book_service/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: sqlite+aiosqlite:////data/python_perps.db
+    volumes:
+      - db_data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      fastapi:
+        condition: service_healthy
+    network_mode: service:redis
+
+  db_ingestor:
+    build:
+      <<: *source-context
+      dockerfile: app/services/db_ingestor_service/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: sqlite+aiosqlite:////data/python_perps.db
+    volumes:
+      - db_data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      fastapi:
+        condition: service_healthy
+    network_mode: service:redis
+
+  liquidity_bot:
+    build:
+      <<: *source-context
+      dockerfile: app/services/bot_service/Dockerfile
+    restart: unless-stopped
+    environment:
+      BOT_API_BASE_URL: http://fastapi:8000
+      BOT_WS_BASE_URL: ws://fastapi:8000
+      BOT_COUNT: ${BOT_COUNT:-5}
+      BOT_STARTING_BALANCE: ${BOT_STARTING_BALANCE:-5000}
+      BOT_MIN_SLEEP_SECONDS: ${BOT_MIN_SLEEP_SECONDS:-1.5}
+      BOT_MAX_SLEEP_SECONDS: ${BOT_MAX_SLEEP_SECONDS:-7}
+    depends_on:
+      fastapi:
+        condition: service_healthy
+      orderbook:
+        condition: service_started
+      db_ingestor:
+        condition: service_started
+
+volumes:
+  redis_data:
+  db_data:
+
+networks:
+  vps_proxy:
+    name: vps_proxy
+    external: true

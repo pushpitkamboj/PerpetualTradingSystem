@@ -6,6 +6,7 @@ from pydantic import Field
 
 from packages.common_utils import (
     STREAM_PERPS_UPDATES,
+    BinancePrice,
     PositionCreateData,
     PositionCloseData,
     BalanceUpdateData,
@@ -34,6 +35,7 @@ async def shutdown():
 
 PerpsEvent = Annotated[
     Union[
+        BinancePrice,
         PositionCreateData, # after position is created by the engine
         PositionCloseData,
         BalanceUpdateData,
@@ -48,6 +50,9 @@ PerpsEvent = Annotated[
 @broker.subscriber(stream=STREAM_PERPS_UPDATES)
 async def handle_perps_updates(event: PerpsEvent):
     match event.event_type:
+        case "binance_data":
+            return
+
         case "create_position":
             await create_position(event.payload) 
         

@@ -18,7 +18,11 @@ async def close_position(payload: ClosePositionDetails):
             "message": "no open position"
         }
     side = "long" if pos.qty > 0 else "short"
-    close_position_at_market_order_price = _close_or_liquidify_position(market, pos, side, user_id, source="close_position") #conceptually both work similarly, the only difference is one is forced triggered and other is user triggered
+    close_position_at_market_order_price = await _close_or_liquidify_position(market, pos, side, user_id, source="close_position") #conceptually both work similarly, the only difference is one is forced triggered and other is user triggered
+    if close_position_at_market_order_price is None:
+        return {
+            "message": "not enough market liquidity to close position"
+        }
     realized_pnl, available, locked = update_account_after_close_position(user_id, close_position_at_market_order_price, pos)
     await publish_orderbook_update(market)
     payload = PositionClosePayload(

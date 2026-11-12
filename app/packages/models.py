@@ -1,7 +1,8 @@
 import uuid
+import os
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, Float, Integer, String
+from sqlalchemy import Column, DateTime, Float, Integer, String, text
 
 from packages.db import Base
 
@@ -10,11 +11,7 @@ class User(Base):
     """
     SQLAlchemy ORM model for persisted user/auth data.
 
-    Meta for this project:
-    - only backend-owned data should live in Postgres
-    - for this assignment, that mainly means users/auth fields
-    - exchange state like orders, balances, fills, and orderbook depth
-      belongs to the engine process in memory, not this ORM layer
+    Persisted authentication data for registered accounts.
     """
 
     __tablename__ = "users"
@@ -40,7 +37,13 @@ class AccountBalance(Base):
     user_id = Column(String, primary_key=True)
     available = Column(Float, nullable=False, default=0)
     locked = Column(Float, nullable=False, default=0)
-    updated_at = Column(DateTime, nullable=False, default=datetime.now(), onupdate=datetime.now())
+    wallet_balance = Column(
+        Float,
+        nullable=False,
+        default=lambda: float(os.getenv("DEMO_WALLET_BALANCE", "10000")),
+        server_default=text("10000"),
+    )
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
 
 
 class OrderProjection(Base):
@@ -51,7 +54,11 @@ class OrderProjection(Base):
     market = Column(String, nullable=False)
     status = Column(String, nullable=False)
     remaining_qty = Column(Float, nullable=False)
-    updated_at = Column(DateTime, nullable=False, default=datetime.now(), onupdate=datetime.now())
+    side = Column(String, nullable=True)
+    order_type = Column(String, nullable=True)
+    price = Column(Float, nullable=True)
+    leverage = Column(Float, nullable=True)
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
 
 
 class FillProjection(Base):
@@ -78,4 +85,4 @@ class PositionProjection(Base):
     margin = Column(Float, nullable=False)
     liquidation_price = Column(Float, nullable=False)
     realized_pnl = Column(Float, nullable=True)
-    updated_at = Column(DateTime, nullable=False, default=datetime.now(), onupdate=datetime.now())
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)

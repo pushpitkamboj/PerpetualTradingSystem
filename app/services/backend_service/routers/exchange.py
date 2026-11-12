@@ -26,8 +26,12 @@ class Order(BaseModel):
     market: MARKET
     side: SIDE
     order_type: ORDER_TYPE
-    qty: float
-    price: float
+    qty: float = Field(gt=0, allow_inf_nan=False)
+    price: float = Field(
+        gt=0,
+        allow_inf_nan=False,
+        description="Limit price, or execution price guard for a market order.",
+    )
     leverage: int = Field(le=MAX_LEVERAGE, ge=MIN_LEVERAGE)
 
 @router.post("/order", status_code=status.HTTP_201_CREATED)
@@ -73,7 +77,7 @@ async def create_order(order: Order, user_id: str = Depends(require_auth)):
     }
 
 class AmountRequest(BaseModel):
-    amount: float = Field(gt=0)
+    amount: float = Field(gt=0, allow_inf_nan=False)
 
 @router.post("/onramp", status_code=status.HTTP_202_ACCEPTED)
 async def onramp_route(payload: AmountRequest, user_id: str = Depends(require_auth)):
@@ -104,6 +108,10 @@ async def onramp_route(payload: AmountRequest, user_id: str = Depends(require_au
                 "error": str(e)
             }
         )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="backend balance service is temporarily unavailable",
+        )
     return message
 
 @router.post("/offramp", status_code=status.HTTP_202_ACCEPTED)
@@ -133,11 +141,15 @@ async def offramp(payload: AmountRequest, user_id = Depends(require_auth)):
                 "error": str(e)
             }
         )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="backend balance service is temporarily unavailable",
+        )
     return message
 
 
 @router.post("/close-position", status_code=status.HTTP_202_ACCEPTED)
-async def close_position(market=Query(), user_id = Depends(require_auth)):
+async def close_position(market: MARKET = Query(), user_id: str = Depends(require_auth)):
     payload = ClosePositionDetails(
         user_id=user_id,
         market=market
@@ -155,6 +167,20 @@ async def close_position(market=Query(), user_id = Depends(require_auth)):
         )
     except Exception as e:
         logger.exception(
-            msg="could not send the close position event to stream"
+            msg="could not send the close position event to stream",
+            extra={
+                "user_id": user_id,
+                "market": market,
+                "correlation_id": correlation_id,
+                "error": str(e)
+            }
         )
-
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="backend order service is temporarily unavailable",
+        )
+    return {
+        "message": "accepted",
+        "market": market,
+        "correlation_id": correlation_id,
+    }

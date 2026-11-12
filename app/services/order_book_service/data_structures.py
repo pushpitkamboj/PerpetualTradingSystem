@@ -49,6 +49,9 @@ class OrderRecord(BaseModel):
 class User(BaseModel):
     user_id: str
     collateral: Collateral
+    # Demo funds are an internal wallet balance that can be transferred to
+    # collateral through the onramp. Keep it in engine state with the account.
+    wallet_balance: float = 10_000
 
 class SyntheticOrder(BaseModel):
     user_id: str
@@ -73,3 +76,8 @@ order_books["ETH-PERP"] = {
     "short": []
 }
 
+# for market in ("BTC-PERP", "ETH-PERP"):
+#     order_books[market] = {
+#         "long": [],
+#         "short": []
+#     }

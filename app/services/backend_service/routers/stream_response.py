@@ -16,7 +16,17 @@ async def create_position(payload):
 
 
 async def binance_data(payload):
-    return
+    for market, price in payload.items():
+        await manager.send_to_market(
+            market,
+            {
+                "event_type": "binance_data",
+                "payload": {
+                    "market": market,
+                    "price": price,
+                },
+            }
+        )
 
 
 async def close_position(payload):

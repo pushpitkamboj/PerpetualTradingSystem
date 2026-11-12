@@ -4,7 +4,15 @@ from pydantic import BaseModel, Field
 MARKET = Literal["BTC-PERP", "ETH-PERP"]
 SIDE = Literal["long", "short"]  # long = buy, short = sell
 ORDER_TYPE = Literal["limit", "market"]
-STATUS = Literal["filled", "binance_data", "open", "partially_filled"]
+STATUS = Literal[
+    "filled",
+    "binance_data",
+    "open",
+    "partially_filled",
+    "partially_filled_cancelled",
+    "cancelled",
+    "rejected",
+]
 
 MAX_LEVERAGE = 20
 MIN_LEVERAGE = 1
@@ -57,6 +65,10 @@ class Position(BaseModel):
     liquidation_price: float
     unrealized_pnl: float
     realized_pnl: float | None = None
+    # Frontend-friendly aliases retained alongside the canonical API fields.
+    entry: float | None = None
+    side: SIDE | None = None
+    leverage: float | None = None
 
 class Fill(BaseModel):
     fill_id: str
@@ -77,6 +89,12 @@ class PositionCreatePayload(BaseModel):
     remaining_qty: float
     fills: list[Fill]
     position: Position | None
+    available: float | None = None
+    locked: float | None = None
+    side: SIDE | None = None
+    order_type: ORDER_TYPE | None = None
+    price: float | None = None
+    leverage: float | None = None
     
 class PositionCreateData(BaseModel):
     event_type: Literal["create_position"]
@@ -99,6 +117,10 @@ class BalanceUpdatePayload(BaseModel):
     user_id: str
     message: str
     balance: float
+    locked: float = 0
+    wallet_balance: float | None = None
+    update_type: Literal["onramp", "offramp"] | None = None
+    status: Literal["success", "rejected"] = "success"
 
 class BalanceUpdateData(BaseModel):
     event_type: Literal["balance_update"]

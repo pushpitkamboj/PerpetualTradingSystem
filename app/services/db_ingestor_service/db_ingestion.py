@@ -1,3 +1,5 @@
+import os
+
 from packages.db import SessionLocal
 from packages.common_utils import (
     Position,     
@@ -13,10 +15,17 @@ from packages.models import (
     PositionProjection,
 )
 
+DEFAULT_WALLET_BALANCE = float(os.getenv("DEMO_WALLET_BALANCE", "10000"))
+
 async def _get_or_create_balance(session, user_id: str):
     balance = await session.get(AccountBalance, user_id)
     if balance is None:
-        balance = AccountBalance(user_id=user_id, available=0, locked=0)
+        balance = AccountBalance(
+            user_id=user_id,
+            available=0,
+            locked=0,
+            wallet_balance=DEFAULT_WALLET_BALANCE,
+        )
         session.add(balance)
     return balance
 
@@ -39,6 +48,10 @@ async def create_position(payload: PositionCreatePayload):
         order.market = payload.market
         order.status = payload.status
         order.remaining_qty = payload.remaining_qty
+        order.side = payload.side
+        order.order_type = payload.order_type
+        order.price = payload.price
+        order.leverage = payload.leverage
 
         for fill in payload.fills:
             existing_fill = await session.get(FillProjection, fill.fill_id)
@@ -58,6 +71,13 @@ async def create_position(payload: PositionCreatePayload):
                 )
             )
 
+        # Every participant's collateral can change when an order fills,
+        # including a counterparty whose position was reduced or closed.
+        balance = await _get_or_create_balance(session, payload.user_id)
+        if payload.available is not None:
+            balance.available = payload.available
+        if payload.locked is not None:
+            balance.locked = payload.locked
         if payload.position is not None:
             position_key = {
                 "user_id": payload.user_id,
@@ -68,9 +88,17 @@ async def create_position(payload: PositionCreatePayload):
                 position = PositionProjection(**position_key)
                 session.add(position)
             _apply_position(position, payload.position)
-
-            balance = await _get_or_create_balance(session, payload.user_id)
-            balance.locked = payload.position.margin
+            if payload.locked is None:
+                # Compatibility with update events produced before collateral
+                # snapshots were added to PositionCreatePayload.
+                balance.locked = payload.position.margin
+        else:
+            stale_position = await session.get(
+                PositionProjection,
+                {"user_id": payload.user_id, "market": payload.market},
+            )
+            if stale_position is not None:
+                await session.delete(stale_position)
 
         await session.commit()
 
@@ -92,9 +120,14 @@ async def close_position(payload: PositionClosePayload):
 
 
 async def balance_update(payload: BalanceUpdatePayload):
+    if payload.status == "rejected":
+        return
     async with SessionLocal() as session:
         balance = await _get_or_create_balance(session, payload.user_id)
         balance.available = payload.balance
+        balance.locked = payload.locked
+        if payload.wallet_balance is not None:
+            balance.wallet_balance = payload.wallet_balance
         await session.commit()
 
 

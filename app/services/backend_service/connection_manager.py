@@ -8,6 +8,10 @@ class ConnectionManager:
         self.websocket_users: dict[WebSocket, str] = {}
         self.websocket_markets: dict[WebSocket, set[str]] = {}
 
+    async def connect_market(self, websocket: WebSocket):
+        await websocket.accept()
+        self.websocket_markets[websocket] = set()
+
     async def connect_user(self, user_id: str, websocket: WebSocket):
         await websocket.accept()
         self.websocket_users[websocket] = user_id

@@ -8,6 +8,7 @@ from create_order import create_order_engine
 from on_price_update import on_price_update
 from close_position import close_position
 from balance_updates import balance_update
+from state_recovery import restore_exchange_state
 
 from typing import Annotated, Union
 from pydantic import Field
@@ -18,6 +19,11 @@ from packages.common_utils import (
     ClosePosition,
     STREAM_PERPS
 )
+
+
+@app.on_startup
+async def restore_state():
+    await restore_exchange_state()
 
 PerpsEvent = Annotated[
     Union[

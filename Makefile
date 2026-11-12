@@ -42,7 +42,7 @@ shell-api: ## Open a shell inside the FastAPI container.
 	$(COMPOSE) exec fastapi sh
 
 test: ## Run the local test suite.
-	$(PYTEST)
+	$(PYTEST) -m "not e2e"
 
 test-e2e: ## Run end-to-end tests against Docker Compose.
 	$(PYTEST) -m e2e app/packages/test_e2e.py

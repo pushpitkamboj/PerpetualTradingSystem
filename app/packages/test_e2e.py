@@ -17,6 +17,7 @@ pytestmark = pytest.mark.e2e
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BASE_URL = os.getenv("E2E_BASE_URL", "http://127.0.0.1:8000")
 WS_URL = os.getenv("E2E_WS_URL", "ws://127.0.0.1:8000/ws")
+MARKET_WS_URL = os.getenv("E2E_MARKET_WS_URL", "ws://127.0.0.1:8000/ws/market")
 PASSWORD = "secret123"
 SUPPORTED_MARKET = "BTC-PERP"
 
@@ -162,7 +163,7 @@ def db_snapshot(user1_id: str, user2_id: str) -> dict[str, Any]:
 import json
 import sqlite3
 
-conn = sqlite3.connect('/app/test.db')
+conn = sqlite3.connect('/data/python_perps.db')
 cur = conn.cursor()
 
 def scalar(query, args=()):
@@ -194,7 +195,7 @@ def db_user_snapshot(user_id: str) -> dict[str, Any]:
 import json
 import sqlite3
 
-conn = sqlite3.connect('/app/test.db')
+conn = sqlite3.connect('/data/python_perps.db')
 cur = conn.cursor()
 
 def scalar(query, args=()):
@@ -315,6 +316,17 @@ async def test_auth_and_rest_validation_edges(client: httpx.AsyncClient) -> None
     )
     assert invalid_leverage.status_code == 422
 
+    close = await post(
+        client,
+        f"/close-position?market={SUPPORTED_MARKET}",
+        token=session.token,
+    )
+    assert close.status_code == 202
+    close_body = close.json()
+    assert close_body["message"] == "accepted"
+    assert close_body["market"] == SUPPORTED_MARKET
+    assert close_body["correlation_id"]
+
 
 @pytest.mark.asyncio
 async def test_websocket_auth_and_subscription_edges(client: httpx.AsyncClient) -> None:
@@ -339,6 +351,45 @@ async def test_websocket_auth_and_subscription_edges(client: httpx.AsyncClient) 
             "event_type": "market_subscribed",
             "payload": {"market": SUPPORTED_MARKET},
         }
+
+
+@pytest.mark.asyncio
+async def test_public_market_websocket_without_auth(client: httpx.AsyncClient) -> None:
+    async with websockets.connect(MARKET_WS_URL) as websocket:
+        await websocket.send(json.dumps({"type": "ping"}))
+        assert await recv_json(websocket) == {"event_type": "pong", "payload": {}}
+
+        await websocket.send(json.dumps({"type": "subscribe_market", "market": "DOGE-PERP"}))
+        unsupported = await recv_json(websocket)
+        assert unsupported["event_type"] == "error"
+        assert unsupported["payload"]["message"] == "unsupported market"
+
+        await websocket.send(json.dumps({"type": "subscribe_market", "market": SUPPORTED_MARKET}))
+        subscribed = await recv_json(websocket)
+        assert subscribed == {
+            "event_type": "market_subscribed",
+            "payload": {"market": SUPPORTED_MARKET},
+        }
+
+        publish_orderbook_update(SUPPORTED_MARKET)
+        public_event = await recv_json(websocket)
+        assert public_event["event_type"] == "update_orderbook"
+        assert public_event["payload"]["market"] == SUPPORTED_MARKET
+
+        await websocket.send(json.dumps({"type": "unsubscribe_market", "market": SUPPORTED_MARKET}))
+        assert (await recv_json(websocket))["event_type"] == "market_unsubscribed"
+
+
+@pytest.mark.asyncio
+async def test_public_market_websocket_does_not_receive_private_events(client: httpx.AsyncClient) -> None:
+    session = await signup_and_signin(client, "public_private_isolation")
+
+    async with websockets.connect(MARKET_WS_URL) as public_ws:
+        onramp = await post(client, "/onramp", {"amount": 1000}, token=session.token)
+        assert onramp.status_code == 202
+
+        with pytest.raises(asyncio.TimeoutError):
+            await recv_json(public_ws, timeout=0.5)
 
 
 @pytest.mark.asyncio

@@ -5,12 +5,17 @@ from uuid import uuid4
 import json
 import asyncio
 import logging
+from urllib.request import urlopen
 import websockets
 from faststream import FastStream
 from faststream.redis import RedisBroker
 from packages.common_utils import STREAM_PERPS, BinancePrice, MARKET
 
 BINANCE_WS = os.getenv("BINANCE_URL", "wss://fstream.binance.com/ws/!markPrice@arr")
+BINANCE_REST_URL = os.getenv("BINANCE_REST_URL", "https://fapi.binance.com/fapi/v1/premiumIndex")
+BINANCE_REST_POLL_INTERVAL_SECONDS = float(os.getenv("BINANCE_REST_POLL_INTERVAL_SECONDS", "1"))
+BINANCE_HTTP_TIMEOUT_SECONDS = float(os.getenv("BINANCE_HTTP_TIMEOUT_SECONDS", "10"))
+BINANCE_WS_MESSAGE_TIMEOUT_SECONDS = float(os.getenv("BINANCE_WS_MESSAGE_TIMEOUT_SECONDS", "8"))
 
 SYMBOL_TO_MARKET: dict[str, MARKET] = {
     "BTCUSDT": "BTC-PERP",
@@ -25,30 +30,67 @@ logger = logging.getLogger(__name__)
 async def start_binance_listener():
     asyncio.create_task(listen_binance()) #NOTE: this can be a bad architecture design as the binance websocket listen is being blocked by the publisher async await, Its better to create 2 coroutines so binance WS can be truly async and store the data in a inmemory queue so then publisher can then push
 
-async def listen_binance():
+def _extract_market_index_prices(payload) -> dict[MARKET, float]:
+    assets = payload if isinstance(payload, list) else [payload]
+    market_index_prices: dict[MARKET, float] = {}
+    for asset in assets:
+        if not isinstance(asset, dict):
+            continue
+        symbol = asset.get("s") or asset.get("symbol")
+        market = SYMBOL_TO_MARKET.get(symbol)
+        if not market:
+            continue
+        raw_price = asset.get("i") or asset.get("indexPrice") or asset.get("p") or asset.get("markPrice")
+        if raw_price is None:
+            continue
+        market_index_prices[market] = float(raw_price)
+    return market_index_prices
+
+async def _publish_market_index_prices(market_index_prices: dict[MARKET, float]):
+    if not market_index_prices:
+        return
+    message = BinancePrice(
+        event_type="binance_data",
+        payload=market_index_prices
+    )
+    await broker.publish(
+        message=message,
+        stream=STREAM_PERPS,
+        correlation_id=str(uuid4())
+    )
+
+
+def _fetch_rest_snapshot() -> dict[MARKET, float]:
+    with urlopen(BINANCE_REST_URL, timeout=BINANCE_HTTP_TIMEOUT_SECONDS) as response:
+        payload = json.load(response)
+    return _extract_market_index_prices(payload)
+
+
+async def _listen_binance_websocket():
+    async with websockets.connect(BINANCE_WS) as ws:
+        while True:
+            msg = await asyncio.wait_for(ws.recv(), timeout=BINANCE_WS_MESSAGE_TIMEOUT_SECONDS)
+            data = json.loads(msg)
+            await _publish_market_index_prices(_extract_market_index_prices(data))
+
+
+async def _poll_rest_forever():
+    logger.warning("binance websocket feed is unavailable; using REST polling fallback")
     while True:
         try:
-            async with websockets.connect(BINANCE_WS) as ws:
-                while True:
-                    msg = await ws.recv()
-                    data = json.loads(msg)
+            market_index_prices = await asyncio.to_thread(_fetch_rest_snapshot)
+            await _publish_market_index_prices(market_index_prices)
+        except Exception as exc:
+            logger.exception("binance REST polling failed; retrying", extra={"error": str(exc)})
+        await asyncio.sleep(BINANCE_REST_POLL_INTERVAL_SECONDS)
 
-                    market_index_prices: dict[MARKET, float] = {}
-                    for asset in data:
-                        market = SYMBOL_TO_MARKET.get(asset["s"])
-                        if market:
-                            market_index_prices[market] = float(asset["i"])
-                    if not market_index_prices:
-                        continue
-                    message = BinancePrice(
-                        event_type="binance_data",
-                        payload=market_index_prices
-                    )
-                    await broker.publish(
-                        message=message,
-                        stream=STREAM_PERPS,
-                        correlation_id=str(uuid4())
-                    )
-        except Exception as e:
-            logger.exception("binance websocket listener failed; reconnecting", extra={"error": str(e)})
-            await asyncio.sleep(3)
+
+async def listen_binance():
+    try:
+        await _listen_binance_websocket()
+    except asyncio.TimeoutError:
+        logger.warning("binance websocket feed timed out; switching to REST polling fallback")
+        await _poll_rest_forever()
+    except Exception as exc:
+        logger.exception("binance websocket listener failed; switching to REST polling", extra={"error": str(exc)})
+        await _poll_rest_forever()
