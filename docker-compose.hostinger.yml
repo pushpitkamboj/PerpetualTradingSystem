@@ -1,9 +1,27 @@
-# Hostinger Docker Manager stack. The same repository ref is used for each
-# service so Docker can build each service from its checked-in Dockerfile.
-x-source-context: &source-context
-  context: https://github.com/pushpitkamboj/PerpetualTradingSystem.git#perps-hostinger-deploy-20261112
+# Hostinger Docker Manager currently pulls images and starts Compose projects;
+# it does not build the Dockerfiles in this repository. Follow the deployed
+# aidataanalyst pattern: clone the source once, then install each service's
+# requirements and run that service in its own Python container.
+x-repository: &repository
+  GIT_REPOSITORY: https://github.com/pushpitkamboj/PerpetualTradingSystem.git
+  GIT_BRANCH: perps-hostinger-deploy-20261112
 
 services:
+  source_sync:
+    image: alpine/git:2.47.2
+    restart: "no"
+    environment: *repository
+    volumes:
+      - source_data:/src
+    entrypoint: ["/bin/sh", "-ec"]
+    command: >
+      if [ -d /src/.git ]; then
+        git -C /src fetch --depth 1 origin "$${GIT_BRANCH}";
+        git -C /src reset --hard FETCH_HEAD;
+      else
+        git clone --depth 1 --branch "$${GIT_BRANCH}" "$${GIT_REPOSITORY}" /src;
+      fi
+
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -16,11 +34,14 @@ services:
       retries: 20
 
   fastapi:
-    build:
-      <<: *source-context
-      dockerfile: app/services/backend_service/Dockerfile
+    image: python:3.13-slim
     restart: unless-stopped
+    working_dir: /src/app/services/backend_service
+    command: >
+      sh -ec 'pip install --no-cache-dir -r requirements.txt &&
+      exec uvicorn app:app --host 0.0.0.0 --port 8000'
     environment:
+      PYTHONPATH: /src/app
       REDIS_SERVER_URL: redis://redis:6379
       DATABASE_URL: sqlite+aiosqlite:////data/python_perps.db
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in the Hostinger project environment}
@@ -28,6 +49,7 @@ services:
       CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-https://perpetual-trading-system.pushpitkamboj.com}
       CORS_ALLOW_ORIGIN_REGEX: ""
     volumes:
+      - source_data:/src:ro
       - db_data:/data
     expose:
       - "8000"
@@ -37,6 +59,8 @@ services:
         aliases:
           - python-perps-fastapi
     depends_on:
+      source_sync:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     healthcheck:
@@ -48,29 +72,42 @@ services:
       interval: 10s
       timeout: 3s
       retries: 20
-      start_period: 15s
+      start_period: 30s
 
   binance:
-    build:
-      <<: *source-context
-      dockerfile: app/services/binance_service/Dockerfile
+    image: python:3.13-slim
     restart: unless-stopped
+    working_dir: /src/app/services/binance_service
+    command: >
+      sh -ec 'pip install --no-cache-dir -r requirements.txt &&
+      exec faststream run app:app'
     environment:
+      PYTHONPATH: /src/app
       REDIS_SERVER_URL: redis://redis:6379
+    volumes:
+      - source_data:/src:ro
     depends_on:
+      source_sync:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
 
   orderbook:
-    build:
-      <<: *source-context
-      dockerfile: app/services/order_book_service/Dockerfile
+    image: python:3.13-slim
     restart: unless-stopped
+    working_dir: /src/app/services/order_book_service
+    command: >
+      sh -ec 'pip install --no-cache-dir -r requirements.txt &&
+      exec faststream run app:app'
     environment:
+      PYTHONPATH: /src/app
       DATABASE_URL: sqlite+aiosqlite:////data/python_perps.db
     volumes:
+      - source_data:/src:ro
       - db_data:/data
     depends_on:
+      source_sync:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       fastapi:
@@ -78,15 +115,21 @@ services:
     network_mode: service:redis
 
   db_ingestor:
-    build:
-      <<: *source-context
-      dockerfile: app/services/db_ingestor_service/Dockerfile
+    image: python:3.13-slim
     restart: unless-stopped
+    working_dir: /src/app/services/db_ingestor_service
+    command: >
+      sh -ec 'pip install --no-cache-dir -r requirements.txt &&
+      exec faststream run app:app'
     environment:
+      PYTHONPATH: /src/app
       DATABASE_URL: sqlite+aiosqlite:////data/python_perps.db
     volumes:
+      - source_data:/src:ro
       - db_data:/data
     depends_on:
+      source_sync:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       fastapi:
@@ -94,18 +137,25 @@ services:
     network_mode: service:redis
 
   liquidity_bot:
-    build:
-      <<: *source-context
-      dockerfile: app/services/bot_service/Dockerfile
+    image: python:3.13-slim
     restart: unless-stopped
+    working_dir: /src/app
+    command: >
+      sh -ec 'pip install --no-cache-dir -r services/bot_service/requirements.txt &&
+      exec python -m packages.liquidity_bot'
     environment:
+      PYTHONPATH: /src/app
       BOT_API_BASE_URL: http://fastapi:8000
       BOT_WS_BASE_URL: ws://fastapi:8000
       BOT_COUNT: ${BOT_COUNT:-5}
       BOT_STARTING_BALANCE: ${BOT_STARTING_BALANCE:-5000}
       BOT_MIN_SLEEP_SECONDS: ${BOT_MIN_SLEEP_SECONDS:-1.5}
       BOT_MAX_SLEEP_SECONDS: ${BOT_MAX_SLEEP_SECONDS:-7}
+    volumes:
+      - source_data:/src:ro
     depends_on:
+      source_sync:
+        condition: service_completed_successfully
       fastapi:
         condition: service_healthy
       orderbook:
@@ -114,6 +164,7 @@ services:
         condition: service_started
 
 volumes:
+  source_data:
   redis_data:
   db_data:
 
