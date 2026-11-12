@@ -1,7 +1,7 @@
 # Hostinger Docker Manager stack. The same repository ref is used for each
 # service so Docker can build each service from its checked-in Dockerfile.
 x-source-context: &source-context
-  context: https://github.com/pushpitkamboj/CENTRALIZED_PERPETUALS_EXCHANGE.git#perps-hostinger-deploy-20261112
+  context: https://github.com/pushpitkamboj/PerpetualTradingSystem.git#perps-hostinger-deploy-20261112
 
 services:
   redis:
