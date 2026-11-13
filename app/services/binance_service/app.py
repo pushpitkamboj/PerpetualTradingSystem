@@ -5,6 +5,8 @@ from uuid import uuid4
 import json
 import asyncio
 import logging
+import math
+from urllib.error import HTTPError
 from urllib.request import urlopen
 import websockets
 from faststream import FastStream
@@ -12,7 +14,14 @@ from faststream.redis import RedisBroker
 from packages.common_utils import STREAM_PERPS, BinancePrice, MARKET
 
 BINANCE_WS = os.getenv("BINANCE_URL", "wss://fstream.binance.com/ws/!markPrice@arr")
-BINANCE_REST_URL = os.getenv("BINANCE_REST_URL", "https://fapi.binance.com/fapi/v1/premiumIndex")
+# Use Binance's public market-data-only spot endpoint for the REST fallback.
+# Binance Futures can return HTTP 451 from regions where its futures API is not
+# available. The app is a paper-trading simulator, so spot prices are a usable
+# index proxy when the futures mark-price stream cannot be reached.
+BINANCE_REST_URL = os.getenv(
+    "BINANCE_REST_URL",
+    "https://data-api.binance.vision/api/v3/ticker/price?symbols=%5B%22BTCUSDT%22,%22ETHUSDT%22%5D",
+)
 BINANCE_REST_POLL_INTERVAL_SECONDS = float(os.getenv("BINANCE_REST_POLL_INTERVAL_SECONDS", "1"))
 BINANCE_HTTP_TIMEOUT_SECONDS = float(os.getenv("BINANCE_HTTP_TIMEOUT_SECONDS", "10"))
 BINANCE_WS_MESSAGE_TIMEOUT_SECONDS = float(os.getenv("BINANCE_WS_MESSAGE_TIMEOUT_SECONDS", "8"))
@@ -40,10 +49,21 @@ def _extract_market_index_prices(payload) -> dict[MARKET, float]:
         market = SYMBOL_TO_MARKET.get(symbol)
         if not market:
             continue
-        raw_price = asset.get("i") or asset.get("indexPrice") or asset.get("p") or asset.get("markPrice")
+        raw_price = (
+            asset.get("i")
+            or asset.get("indexPrice")
+            or asset.get("p")
+            or asset.get("markPrice")
+            or asset.get("price")
+        )
         if raw_price is None:
             continue
-        market_index_prices[market] = float(raw_price)
+        try:
+            price = float(raw_price)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(price) and price > 0:
+            market_index_prices[market] = price
     return market_index_prices
 
 async def _publish_market_index_prices(market_index_prices: dict[MARKET, float]):
@@ -75,13 +95,24 @@ async def _listen_binance_websocket():
 
 
 async def _poll_rest_forever():
-    logger.warning("binance websocket feed is unavailable; using REST polling fallback")
+    logger.warning("binance futures websocket unavailable; polling the public market-data endpoint")
     while True:
         try:
             market_index_prices = await asyncio.to_thread(_fetch_rest_snapshot)
             await _publish_market_index_prices(market_index_prices)
+        except HTTPError as exc:
+            if exc.code == 451:
+                body = exc.read(512).decode("utf-8", errors="replace").strip()
+                logger.error(
+                    "Binance public market-data endpoint returned HTTP 451; "
+                    "prices are unavailable from this server location: %s",
+                    body or "no response body",
+                )
+                await asyncio.sleep(max(BINANCE_REST_POLL_INTERVAL_SECONDS, 60))
+                continue
+            logger.warning("binance public market-data request failed with HTTP %s", exc.code)
         except Exception as exc:
-            logger.exception("binance REST polling failed; retrying", extra={"error": str(exc)})
+            logger.exception("binance public market-data polling failed; retrying", extra={"error": str(exc)})
         await asyncio.sleep(BINANCE_REST_POLL_INTERVAL_SECONDS)
 
 
