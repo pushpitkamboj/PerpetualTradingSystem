@@ -1,8 +1,12 @@
+import os
+
 from faststream.redis import RedisBroker
 from faststream import FastStream
+from redis.asyncio import Redis
 
 broker = RedisBroker("redis://localhost:6379")
 app = FastStream(broker)
+READY_KEY = f"perps:ready:orderbook:{os.getenv('HOSTNAME', 'unknown')}"
 
 from create_order import create_order_engine
 from on_price_update import on_price_update
@@ -23,7 +27,17 @@ from packages.common_utils import (
 
 @app.on_startup
 async def restore_state():
+    client = Redis.from_url("redis://localhost:6379")
+    await client.delete(READY_KEY)
+    await client.aclose()
     await restore_exchange_state()
+
+
+@app.after_startup
+async def mark_ready():
+    client = Redis.from_url("redis://localhost:6379")
+    await client.set(READY_KEY, "ready", ex=3600)
+    await client.aclose()
 
 PerpsEvent = Annotated[
     Union[

@@ -1,5 +1,8 @@
+import os
+
 from faststream import FastStream
 from faststream.redis import RedisBroker
+from redis.asyncio import Redis
 from packages.db import init_db, close_db
 from typing import Union, Annotated
 from pydantic import Field
@@ -22,10 +25,21 @@ from db_ingestion import (
 )
 broker = RedisBroker("redis://localhost:6379")
 app = FastStream(broker)
+READY_KEY = f"perps:ready:db_ingestor:{os.getenv('HOSTNAME', 'unknown')}"
 
 @app.on_startup
 async def startup():
+    client = Redis.from_url("redis://localhost:6379")
+    await client.delete(READY_KEY)
+    await client.aclose()
     await init_db()
+
+
+@app.after_startup
+async def mark_ready():
+    client = Redis.from_url("redis://localhost:6379")
+    await client.set(READY_KEY, "ready", ex=3600)
+    await client.aclose()
 
 
 @app.on_shutdown

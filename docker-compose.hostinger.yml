@@ -121,7 +121,7 @@ services:
         - CMD
         - python
         - -c
-        - from redis import Redis; assert Redis.from_url('redis://localhost:6379', socket_connect_timeout=2).xinfo_groups('perps')
+        - import os; from redis import Redis; assert Redis.from_url('redis://localhost:6379', socket_connect_timeout=2).get(f"perps:ready:orderbook:{os.environ['HOSTNAME']}") == b'ready'
       interval: 5s
       timeout: 3s
       retries: 30
@@ -153,7 +153,7 @@ services:
         - CMD
         - python
         - -c
-        - from redis import Redis; assert Redis.from_url('redis://localhost:6379', socket_connect_timeout=2).xinfo_groups('perps_updates')
+        - import os; from redis import Redis; assert Redis.from_url('redis://localhost:6379', socket_connect_timeout=2).get(f"perps:ready:db_ingestor:{os.environ['HOSTNAME']}") == b'ready'
       interval: 5s
       timeout: 3s
       retries: 30
