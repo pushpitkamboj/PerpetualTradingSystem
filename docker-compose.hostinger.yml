@@ -116,6 +116,16 @@ services:
       fastapi:
         condition: service_healthy
     network_mode: service:redis
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - from redis import Redis; assert Redis.from_url('redis://localhost:6379', socket_connect_timeout=2).xinfo_groups('perps')
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
 
   db_ingestor:
     image: python:3.13-slim
@@ -138,6 +148,16 @@ services:
       fastapi:
         condition: service_healthy
     network_mode: service:redis
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - from redis import Redis; assert Redis.from_url('redis://localhost:6379', socket_connect_timeout=2).xinfo_groups('perps_updates')
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
 
   liquidity_bot:
     image: python:3.13-slim
@@ -162,9 +182,9 @@ services:
       fastapi:
         condition: service_healthy
       orderbook:
-        condition: service_started
+        condition: service_healthy
       db_ingestor:
-        condition: service_started
+        condition: service_healthy
 
 volumes:
   source_data:
