@@ -14,13 +14,14 @@ services:
     volumes:
       - source_data:/src
     entrypoint: ["/bin/sh", "-ec"]
-    command: >
-      if [ -d /src/.git ]; then
-        git -C /src fetch --depth 1 origin "$${GIT_BRANCH}";
-        git -C /src reset --hard FETCH_HEAD;
-      else
-        git clone --depth 1 --branch "$${GIT_BRANCH}" "$${GIT_REPOSITORY}" /src;
-      fi
+    command:
+      - |
+        if [ -d /src/.git ]; then
+          git -C /src fetch --depth 1 origin "$${GIT_BRANCH}"
+          git -C /src reset --hard FETCH_HEAD
+        else
+          git clone --depth 1 --branch "$${GIT_BRANCH}" "$${GIT_REPOSITORY}" /src
+        fi
 
   redis:
     image: redis:7-alpine
