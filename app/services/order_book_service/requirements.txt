@@ -2,4 +2,4 @@ faststream[redis,cli]>=0.6.7
 pydantic>=2.0.0
 aiosqlite>=0.21.0
 python-dotenv>=1.2.1
-sqlalchemy>=2.0.44
+sqlalchemy[asyncio]>=2.0.44

@@ -4,5 +4,5 @@ fastapi>=0.136.1
 faststream[redis]>=0.6.7
 pyjwt>=2.10.1
 python-dotenv>=1.2.1
-sqlalchemy>=2.0.44
+sqlalchemy[asyncio]>=2.0.44
 uvicorn[standard]>=0.38.0
