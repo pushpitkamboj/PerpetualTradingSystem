@@ -96,10 +96,17 @@ async def _listen_binance_websocket():
 
 async def _poll_rest_forever():
     logger.warning("binance futures websocket unavailable; polling the public market-data endpoint")
+    logged_first_snapshot = False
     while True:
         try:
             market_index_prices = await asyncio.to_thread(_fetch_rest_snapshot)
             await _publish_market_index_prices(market_index_prices)
+            if market_index_prices and not logged_first_snapshot:
+                logger.info(
+                    "public Binance market-data fallback is publishing prices: %s",
+                    market_index_prices,
+                )
+                logged_first_snapshot = True
         except HTTPError as exc:
             if exc.code == 451:
                 body = exc.read(512).decode("utf-8", errors="replace").strip()
