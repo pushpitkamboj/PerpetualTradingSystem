@@ -97,9 +97,15 @@ async def _listen_binance_websocket():
 async def _poll_rest_forever():
     logger.warning("binance futures websocket unavailable; polling the public market-data endpoint")
     logged_first_snapshot = False
+    logged_first_request = False
     while True:
         try:
+            if not logged_first_request:
+                logger.info("requesting public Binance spot prices as the simulator index fallback")
+                logged_first_request = True
             market_index_prices = await asyncio.to_thread(_fetch_rest_snapshot)
+            if not market_index_prices:
+                raise ValueError("ticker response contained no supported BTCUSDT or ETHUSDT price")
             await _publish_market_index_prices(market_index_prices)
             if market_index_prices and not logged_first_snapshot:
                 logger.info(

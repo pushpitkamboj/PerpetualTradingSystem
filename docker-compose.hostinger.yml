@@ -86,6 +86,7 @@ services:
     environment:
       PYTHONPATH: /src/app
       REDIS_SERVER_URL: redis://redis:6379
+      BINANCE_REST_URL: https://data-api.binance.vision/api/v3/ticker/price?symbols=%5B%22BTCUSDT%22,%22ETHUSDT%22%5D
     volumes:
       - source_data:/src:ro
     depends_on:
