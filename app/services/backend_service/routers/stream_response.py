@@ -15,7 +15,7 @@ async def create_position(payload):
     )
 
 
-async def binance_data(payload):
+async def binance_data(payload, source="binance_futures"):
     for market, price in payload.items():
         await manager.send_to_market(
             market,
@@ -24,6 +24,7 @@ async def binance_data(payload):
                 "payload": {
                     "market": market,
                     "price": price,
+                    "source": source,
                 },
             }
         )

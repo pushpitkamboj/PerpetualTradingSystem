@@ -35,9 +35,16 @@ from app import broker
 def calculate_pnl(entry_price, index_price, qty):
     return (index_price - entry_price)*qty
 
-async def on_price_update(market_index_prices: dict[str, float]):
+async def on_price_update(
+    market_index_prices: dict[str, float],
+    source: str = "binance_futures",
+):
     await broker.publish(
-        message=BinancePrice(event_type="binance_data", payload=market_index_prices),
+        message=BinancePrice(
+            event_type="binance_data",
+            payload=market_index_prices,
+            source=source,
+        ),
         stream=STREAM_PERPS_UPDATES,
         correlation_id=str(uuid4())
     )

@@ -27,6 +27,7 @@ MIN_SLEEP_SECONDS = float(os.getenv("BOT_MIN_SLEEP_SECONDS", "1.5"))
 MAX_SLEEP_SECONDS = float(os.getenv("BOT_MAX_SLEEP_SECONDS", "7.0"))
 ORDER_PROBABILITY = float(os.getenv("BOT_ORDER_PROBABILITY", "0.82"))
 CLOSE_PROBABILITY = float(os.getenv("BOT_CLOSE_PROBABILITY", "0.18"))
+CROSS_PROBABILITY = float(os.getenv("BOT_CROSS_PROBABILITY", "0.62"))
 
 Market = Literal["BTC-PERP", "ETH-PERP"]
 Side = Literal["long", "short"]
@@ -237,7 +238,7 @@ class LiquidityBot:
 
     def best_working_price(self, view: MarketView, side: Side):
         spread_bps = random.uniform(-0.0018, 0.0018)
-        should_cross = random.random() < 0.62
+        should_cross = random.random() < CROSS_PROBABILITY
 
         if side == "long" and should_cross and view.asks:
             price = float(view.asks[0]["price"]) * (1 + random.uniform(0, 0.0003))

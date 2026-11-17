@@ -3,7 +3,7 @@
 # aidataanalyst pattern: clone the source once, then install each service's
 # requirements and run that service in its own Python container.
 x-repository: &repository
-  GIT_REPOSITORY: https://github.com/pushpitkamboj/PerpetualTradingSystem.git
+  GIT_REPOSITORY: https://github.com/pushpitkamboj/CENTRALIZED_PERPETUALS_EXCHANGE.git
   GIT_BRANCH: perps-hostinger-deploy-20261112
 
 services:
@@ -87,6 +87,11 @@ services:
       PYTHONPATH: /src/app
       REDIS_SERVER_URL: redis://redis:6379
       BINANCE_REST_URL: https://data-api.binance.vision/api/v3/ticker/price?symbols=%5B%22BTCUSDT%22,%22ETHUSDT%22%5D
+      BINANCE_HTTP_TIMEOUT_SECONDS: ${BINANCE_HTTP_TIMEOUT_SECONDS:-2}
+      ENABLE_SIMULATED_PRICE_FALLBACK: ${ENABLE_SIMULATED_PRICE_FALLBACK:-true}
+      SIMULATED_BTC_PRICE: ${SIMULATED_BTC_PRICE:-69000}
+      SIMULATED_ETH_PRICE: ${SIMULATED_ETH_PRICE:-1940}
+      SIMULATED_PRICE_VOLATILITY_BPS: ${SIMULATED_PRICE_VOLATILITY_BPS:-2}
     volumes:
       - source_data:/src:ro
     depends_on:

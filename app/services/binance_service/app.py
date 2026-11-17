@@ -6,6 +6,7 @@ import json
 import asyncio
 import logging
 import math
+import random
 from urllib.error import HTTPError
 from urllib.request import urlopen
 import websockets
@@ -25,6 +26,12 @@ BINANCE_REST_URL = os.getenv(
 BINANCE_REST_POLL_INTERVAL_SECONDS = float(os.getenv("BINANCE_REST_POLL_INTERVAL_SECONDS", "1"))
 BINANCE_HTTP_TIMEOUT_SECONDS = float(os.getenv("BINANCE_HTTP_TIMEOUT_SECONDS", "10"))
 BINANCE_WS_MESSAGE_TIMEOUT_SECONDS = float(os.getenv("BINANCE_WS_MESSAGE_TIMEOUT_SECONDS", "8"))
+SIMULATED_FALLBACK_ENABLED = os.getenv("ENABLE_SIMULATED_PRICE_FALLBACK", "false").lower() in {"1", "true", "yes", "on"}
+SIMULATED_PRICE_VOLATILITY_BPS = float(os.getenv("SIMULATED_PRICE_VOLATILITY_BPS", "2"))
+latest_market_prices: dict[MARKET, float] = {
+    "BTC-PERP": float(os.getenv("SIMULATED_BTC_PRICE", "69000")),
+    "ETH-PERP": float(os.getenv("SIMULATED_ETH_PRICE", "1940")),
+}
 
 SYMBOL_TO_MARKET: dict[str, MARKET] = {
     "BTCUSDT": "BTC-PERP",
@@ -66,12 +73,17 @@ def _extract_market_index_prices(payload) -> dict[MARKET, float]:
             market_index_prices[market] = price
     return market_index_prices
 
-async def _publish_market_index_prices(market_index_prices: dict[MARKET, float]):
+async def _publish_market_index_prices(
+    market_index_prices: dict[MARKET, float],
+    source: str = "binance_futures",
+):
     if not market_index_prices:
         return
+    latest_market_prices.update(market_index_prices)
     message = BinancePrice(
         event_type="binance_data",
-        payload=market_index_prices
+        payload=market_index_prices,
+        source=source,
     )
     await broker.publish(
         message=message,
@@ -91,13 +103,17 @@ async def _listen_binance_websocket():
         while True:
             msg = await asyncio.wait_for(ws.recv(), timeout=BINANCE_WS_MESSAGE_TIMEOUT_SECONDS)
             data = json.loads(msg)
-            await _publish_market_index_prices(_extract_market_index_prices(data))
+            await _publish_market_index_prices(
+                _extract_market_index_prices(data),
+                source="binance_futures",
+            )
 
 
 async def _poll_rest_forever():
     logger.warning("binance futures websocket unavailable; polling the public market-data endpoint")
     logged_first_snapshot = False
     logged_first_request = False
+    logged_451 = False
     while True:
         try:
             if not logged_first_request:
@@ -106,7 +122,7 @@ async def _poll_rest_forever():
             market_index_prices = await asyncio.to_thread(_fetch_rest_snapshot)
             if not market_index_prices:
                 raise ValueError("ticker response contained no supported BTCUSDT or ETHUSDT price")
-            await _publish_market_index_prices(market_index_prices)
+            await _publish_market_index_prices(market_index_prices, source="binance_spot")
             if market_index_prices and not logged_first_snapshot:
                 logger.info(
                     "public Binance market-data fallback is publishing prices: %s",
@@ -115,18 +131,36 @@ async def _poll_rest_forever():
                 logged_first_snapshot = True
         except HTTPError as exc:
             if exc.code == 451:
-                body = exc.read(512).decode("utf-8", errors="replace").strip()
-                logger.error(
-                    "Binance public market-data endpoint returned HTTP 451; "
-                    "prices are unavailable from this server location: %s",
-                    body or "no response body",
-                )
-                await asyncio.sleep(max(BINANCE_REST_POLL_INTERVAL_SECONDS, 60))
+                if not logged_451:
+                    body = exc.read(512).decode("utf-8", errors="replace").strip()
+                    logger.error(
+                        "Binance public market-data endpoint returned HTTP 451; "
+                        "prices are unavailable from this server location: %s",
+                        body or "no response body",
+                    )
+                    logged_451 = True
+                await _publish_simulated_prices()
+                await asyncio.sleep(BINANCE_REST_POLL_INTERVAL_SECONDS)
                 continue
             logger.warning("binance public market-data request failed with HTTP %s", exc.code)
         except Exception as exc:
-            logger.exception("binance public market-data polling failed; retrying", extra={"error": str(exc)})
+            logger.warning(
+                "binance public market-data request failed (%s); retrying",
+                type(exc).__name__,
+            )
+        await _publish_simulated_prices()
         await asyncio.sleep(BINANCE_REST_POLL_INTERVAL_SECONDS)
+
+
+async def _publish_simulated_prices():
+    if not SIMULATED_FALLBACK_ENABLED:
+        return
+    volatility = max(0.0, SIMULATED_PRICE_VOLATILITY_BPS) / 10_000
+    simulated_prices = {
+        market: max(0.01, price * (1 + random.gauss(0, volatility)))
+        for market, price in latest_market_prices.items()
+    }
+    await _publish_market_index_prices(simulated_prices, source="local_simulation")
 
 
 async def listen_binance():

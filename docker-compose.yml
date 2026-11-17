@@ -30,10 +30,11 @@ services:
     environment:
       REDIS_SERVER_URL: redis://redis:6379
       DATABASE_URL: ${COMPOSE_DATABASE_URL:-sqlite+aiosqlite:////data/python_perps.db}
+      CORS_ALLOW_ORIGIN_REGEX: '^https?://(localhost|127\.0\.0\.1):\d+$'
     depends_on:
       - redis
     ports:
-      - "${API_PORT:-8000}:8000"
+      - "127.0.0.1:${API_PORT:-8000}:8000"
     volumes:
       - db_data:/data
     healthcheck:
@@ -55,6 +56,12 @@ services:
       - .env
     environment:
       REDIS_SERVER_URL: redis://redis:6379
+      BINANCE_REST_URL: https://data-api.binance.vision/api/v3/ticker/price?symbols=%5B%22BTCUSDT%22,%22ETHUSDT%22%5D
+      BINANCE_HTTP_TIMEOUT_SECONDS: ${BINANCE_HTTP_TIMEOUT_SECONDS:-2}
+      ENABLE_SIMULATED_PRICE_FALLBACK: ${ENABLE_SIMULATED_PRICE_FALLBACK:-true}
+      SIMULATED_BTC_PRICE: ${SIMULATED_BTC_PRICE:-69000}
+      SIMULATED_ETH_PRICE: ${SIMULATED_ETH_PRICE:-1940}
+      SIMULATED_PRICE_VOLATILITY_BPS: ${SIMULATED_PRICE_VOLATILITY_BPS:-2}
     depends_on:
       - redis
     restart: unless-stopped
@@ -75,6 +82,16 @@ services:
     network_mode: "service:redis"
     volumes:
       - db_data:/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import os; from redis import Redis; assert Redis.from_url('redis://localhost:6379', socket_connect_timeout=2).get(f"perps:ready:orderbook:{os.environ['HOSTNAME']}") == b'ready'
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
     restart: unless-stopped
 
   db_ingestor:
@@ -93,6 +110,16 @@ services:
     network_mode: "service:redis"
     volumes:
       - db_data:/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import os; from redis import Redis; assert Redis.from_url('redis://localhost:6379', socket_connect_timeout=2).get(f"perps:ready:db_ingestor:{os.environ['HOSTNAME']}") == b'ready'
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
     restart: unless-stopped
 
   liquidity_bot:
@@ -108,13 +135,27 @@ services:
       BOT_STARTING_BALANCE: ${BOT_STARTING_BALANCE:-5000}
       BOT_MIN_SLEEP_SECONDS: ${BOT_MIN_SLEEP_SECONDS:-1.5}
       BOT_MAX_SLEEP_SECONDS: ${BOT_MAX_SLEEP_SECONDS:-7}
+      BOT_CROSS_PROBABILITY: ${BOT_CROSS_PROBABILITY:-0.35}
     depends_on:
       fastapi:
         condition: service_healthy
       orderbook:
-        condition: service_started
+        condition: service_healthy
       db_ingestor:
-        condition: service_started
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: /api
+        VITE_WS_BASE_URL: ""
+    depends_on:
+      fastapi:
+        condition: service_healthy
+    ports:
+      - "5174:80"
     restart: unless-stopped
 
 volumes:

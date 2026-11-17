@@ -96,7 +96,7 @@ async def handle_perps_event(event: PerpsUpdatesEvent):
             await create_position(event.payload)
 
         case "binance_data":
-            await binance_data(event.payload)
+            await binance_data(event.payload, source=event.source)
 
         case "close_position":
             await close_position(event.payload)

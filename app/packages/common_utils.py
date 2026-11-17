@@ -38,6 +38,7 @@ class OrderCreate(BaseModel):
 class BinancePrice(BaseModel):
     event_type: Literal["binance_data"]
     payload: dict[MARKET, float]
+    source: Literal["binance_futures", "binance_spot", "local_simulation"] = "binance_futures"
 
 class BalanceDetails(BaseModel):
     update_type: Literal["onramp", "offramp"]

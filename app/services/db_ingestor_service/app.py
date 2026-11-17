@@ -38,7 +38,9 @@ async def startup():
 @app.after_startup
 async def mark_ready():
     client = Redis.from_url("redis://localhost:6379")
-    await client.set(READY_KEY, "ready", ex=3600)
+    # The marker is removed on startup before database initialization. Keep it
+    # until the next restart so long-running workers remain healthy.
+    await client.set(READY_KEY, "ready")
     await client.aclose()
 
 
