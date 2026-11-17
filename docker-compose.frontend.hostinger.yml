@@ -1,0 +1,61 @@
+x-repository: &repository
+  GIT_REPOSITORY: https://github.com/pushpitkamboj/PerpetualTradingSystem.git
+  GIT_BRANCH: perps-hostinger-deploy-20261112
+
+services:
+  source_sync:
+    image: alpine/git:2.47.2
+    restart: "no"
+    environment: *repository
+    volumes:
+      - source_data:/src
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        if [ -d /src/.git ]; then
+          git -C /src fetch --depth 1 origin "$${GIT_BRANCH}"
+          git -C /src reset --hard FETCH_HEAD
+        else
+          find /src -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+          git clone --depth 1 --branch "$${GIT_BRANCH}" "$${GIT_REPOSITORY}" /src
+        fi
+
+  frontend:
+    image: node:22-alpine
+    restart: unless-stopped
+    working_dir: /tmp/frontend
+    command: >
+      sh -ec 'apk add --no-cache nginx &&
+      mkdir -p /tmp/frontend /usr/share/nginx/html &&
+      cp -R /src/frontend/. /tmp/frontend/ &&
+      npm ci &&
+      npm run build &&
+      cp -R dist/. /usr/share/nginx/html/ &&
+      cp /src/frontend/nginx.hostinger.conf /etc/nginx/conf.d/default.conf &&
+      exec nginx -g "daemon off;"'
+    volumes:
+      - source_data:/src:ro
+    expose:
+      - "80"
+    networks:
+      default: {}
+      vps_proxy:
+        aliases:
+          - python-perps-frontend
+    depends_on:
+      source_sync:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 20
+      start_period: 60s
+
+volumes:
+  source_data:
+
+networks:
+  vps_proxy:
+    name: vps_proxy
+    external: true

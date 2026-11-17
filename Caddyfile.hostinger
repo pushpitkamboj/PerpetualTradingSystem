@@ -1,0 +1,19 @@
+aidataanalyst.pushpitkamboj.com {
+    reverse_proxy aidataanalyst:8000
+}
+
+timbre.pushpitkamboj.com {
+    reverse_proxy timbre-web-1:8080
+}
+
+backitup.pushpitkamboj.com {
+    reverse_proxy backitup-web-1:80
+}
+
+backitupapi.pushpitkamboj.com {
+    reverse_proxy backitup-api-1:8000
+}
+
+perpetual-trading-system.pushpitkamboj.com {
+    reverse_proxy python-perps-frontend:80
+}

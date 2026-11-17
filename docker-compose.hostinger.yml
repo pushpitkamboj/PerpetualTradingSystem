@@ -3,7 +3,7 @@
 # aidataanalyst pattern: clone the source once, then install each service's
 # requirements and run that service in its own Python container.
 x-repository: &repository
-  GIT_REPOSITORY: https://github.com/pushpitkamboj/CENTRALIZED_PERPETUALS_EXCHANGE.git
+  GIT_REPOSITORY: https://github.com/pushpitkamboj/PerpetualTradingSystem.git
   GIT_BRANCH: perps-hostinger-deploy-20261112
 
 services:

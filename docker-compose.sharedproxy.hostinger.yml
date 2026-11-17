@@ -1,0 +1,47 @@
+services:
+  source_sync:
+    image: alpine/git:2.47.2
+    restart: "no"
+    environment:
+      GIT_REPOSITORY: https://github.com/pushpitkamboj/PerpetualTradingSystem.git
+      GIT_BRANCH: perps-hostinger-deploy-20261112
+    volumes:
+      - source_data:/src
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        if [ -d /src/.git ]; then
+          git -C /src fetch --depth 1 origin "$${GIT_BRANCH}"
+          git -C /src reset --hard FETCH_HEAD
+        else
+          find /src -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+          git clone --depth 1 --branch "$${GIT_BRANCH}" "$${GIT_REPOSITORY}" /src
+        fi
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    command: ["caddy", "run", "--config", "/src/Caddyfile.hostinger", "--adapter", "caddyfile"]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - source_data:/src:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - vps_proxy
+    depends_on:
+      source_sync:
+        condition: service_completed_successfully
+
+volumes:
+  source_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  vps_proxy:
+    name: vps_proxy
+    external: true

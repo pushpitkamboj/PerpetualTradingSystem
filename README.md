@@ -121,10 +121,26 @@ on first visit; choose **Visit Site** to continue.
 
 Create a paper account, add or withdraw demo collateral, and place limit orders.
 The market feed tries Binance Futures mark prices, then Binance's public Spot
-endpoint as an index proxy. If external market data is unreachable, local Compose
-publishes a small random walk around `SIMULATED_BTC_PRICE` and
-`SIMULATED_ETH_PRICE`; the terminal labels this source as simulated. Orders and
-fills are always simulated by the local matching engine.
+endpoint as an index proxy. If external market data is unreachable, the default
+fallback publishes a small random walk around `SIMULATED_BTC_PRICE` and
+`SIMULATED_ETH_PRICE`; the terminal labels this source as simulated. Set
+`ENABLE_SIMULATED_PRICE_FALLBACK=false` to require an exchange price source.
+Orders and fills are always simulated by the local matching engine.
+
+## Hostinger Docker Manager
+
+The backend project uses `docker-compose.hostinger.yml`. Deploy the browser app
+as a separate `pythonperps-frontend` Compose project using
+`docker-compose.frontend.hostinger.yml`; it builds the Vite bundle from the
+same Git branch and proxies API and WebSocket traffic to the backend over the
+shared `vps_proxy` network. `Caddyfile.hostinger` keeps the existing VPS routes
+and adds the perpetual trading hostname. Apply it with
+`docker-compose.sharedproxy.hostinger.yml`, which keeps Caddy's certificate
+data in named volumes.
+
+The A record for `perpetual-trading-system.pushpitkamboj.com` must point to the
+Hostinger VPS before Caddy can issue its HTTPS certificate. DNS for this domain
+is managed outside the Hostinger account.
 
 Stop everything:
 
@@ -193,7 +209,7 @@ flowchart LR
 7. **Positions can close or liquidate.** A close request travels through the same API and Redis command stream. The engine matches the position against available book liquidity, realizes PnL, releases margin, and publishes the resulting account event. Price updates also trigger PnL and liquidation checks. The engine restores balances, positions, and open orders from saved projections on startup.
 8. **Bots create demo activity.** The `liquidity_bot` signs in as demo users and submits orders or close requests through the same API. Their orders use the same matching engine and appear in market depth; any trades are simulated paper fills.
 
-**Execution note:** prices are public market data when an exchange feed is reachable; otherwise the configured local simulated feed is used and labeled in the terminal. Trades are always local paper trades. Binance does not receive or execute these orders, and no real funds move.
+**Execution note:** prices are public market data when an exchange feed is reachable; otherwise the configured simulated feed is used and labeled in the terminal. Trades are always local paper trades. Binance does not receive or execute these orders, and no real funds move.
 
 Market orders use their submitted price as an execution guard. They consume
 crossing liquidity immediately and cancel any unfilled remainder. Limit orders
