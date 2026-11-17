@@ -17,3 +17,7 @@ backitupapi.pushpitkamboj.com {
 perpetual-trading-system.pushpitkamboj.com {
     reverse_proxy python-perps-frontend:80
 }
+
+srv1644861.hstgr.cloud {
+    reverse_proxy python-perps-frontend:80
+}
