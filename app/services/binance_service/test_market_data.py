@@ -1,4 +1,4 @@
-from app import _extract_market_index_prices
+from app import _extract_kraken_prices, _extract_market_index_prices
 
 
 def test_extracts_binance_futures_index_prices():
@@ -26,4 +26,28 @@ def test_ignores_unsupported_or_invalid_ticker_prices():
             {"symbol": "BTCUSDT", "price": "0"},
             {"symbol": "ETHUSDT", "price": "not-a-price"},
         ]
+    ) == {}
+
+
+def test_extracts_kraken_spot_ticker_prices():
+    assert _extract_kraken_prices(
+        {
+            "error": [],
+            "result": {
+                "XXBTZUSD": {"c": ["64000.0", "0.001"]},
+                "XETHZUSD": {"c": ["3200.0", "0.01"]},
+            },
+        }
+    ) == {"BTC-PERP": 64000.0, "ETH-PERP": 3200.0}
+
+
+def test_ignores_invalid_kraken_ticker_values():
+    assert _extract_kraken_prices(
+        {
+            "error": [],
+            "result": {
+                "XXBTZUSD": {"c": ["NaN", "0.001"]},
+                "XETHZUSD": {"c": ["0", "0.01"]},
+            },
+        }
     ) == {}

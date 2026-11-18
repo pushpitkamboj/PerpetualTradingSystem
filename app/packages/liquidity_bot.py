@@ -237,7 +237,10 @@ class LiquidityBot:
         logger.info("%s requested close for %s", user.username, market)
 
     def best_working_price(self, view: MarketView, side: Side):
-        spread_bps = random.uniform(-0.0018, 0.0018)
+        # Keep resting quotes on the correct side of the index. Randomly
+        # placing both sides above or below the mid makes the bot either
+        # cross the whole book or leave it one-sided.
+        half_spread = random.uniform(0.0001, 0.0004)
         should_cross = random.random() < CROSS_PROBABILITY
 
         if side == "long" and should_cross and view.asks:
@@ -245,7 +248,8 @@ class LiquidityBot:
         elif side == "short" and should_cross and view.bids:
             price = float(view.bids[0]["price"]) * (1 - random.uniform(0, 0.0003))
         else:
-            price = view.price * (1 + spread_bps)
+            direction = -1 if side == "long" else 1
+            price = view.price * (1 + direction * half_spread)
 
         decimals = 2 if view.price > 1000 else 3
         return round(price, decimals)

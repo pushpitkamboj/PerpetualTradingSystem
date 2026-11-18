@@ -11,7 +11,7 @@ type Level = { price: number; qty: number };
 type Position = { market: Market; qty: number; entry_price: number; margin: number; liquidation_price: number; unrealized_pnl: number; realized_pnl?: number | null; side?: Side; leverage?: number };
 type Fill = { fill_id: string; market: Market; price: number; qty: number; timestamp_ms: number; side?: Side };
 type OrderEvent = { order_id: string; market: Market; side?: Side; status: string; price: number; remaining_qty: number; fills: Fill[]; at: number };
-type PriceSource = "waiting" | "binance_futures" | "binance_spot" | "local_simulation";
+type PriceSource = "waiting" | "binance_futures" | "binance_spot" | "kraken_spot" | "local_simulation";
 type MarketState = { price: number | null; source: PriceSource; bids: Level[]; asks: Level[]; history: number[] };
 type Event = { event_type: string; payload: Record<string, any> };
 
@@ -108,7 +108,7 @@ export default function App() {
         const p = event.payload || {};
         if (event.event_type === "binance_data" && MARKETS.includes(p.market)) {
           const m = p.market as Market; const value = Number(p.price);
-          const source = (["binance_futures", "binance_spot", "local_simulation"].includes(p.source) ? p.source : "binance_futures") as PriceSource;
+          const source = (["binance_futures", "binance_spot", "kraken_spot", "local_simulation"].includes(p.source) ? p.source : "binance_futures") as PriceSource;
           setMarkets(prev => ({ ...prev, [m]: { ...prev[m], price: value, source, history: [...prev[m].history, value].slice(-48) } }));
         } else if (event.event_type === "update_orderbook" && MARKETS.includes(p.market)) {
           const m = p.market as Market;
@@ -157,9 +157,11 @@ export default function App() {
     ? "LOCAL SIMULATED PRICE · NO EXCHANGE FEED"
     : state.source === "binance_spot"
       ? "BINANCE SPOT INDEX PROXY · PAPER EXECUTION"
-      : state.source === "binance_futures"
-        ? "BINANCE FUTURES MARK PRICE · PAPER EXECUTION"
-        : "WAITING FOR PRICE SOURCE";
+      : state.source === "kraken_spot"
+        ? "KRAKEN SPOT INDEX PROXY · PAPER EXECUTION"
+        : state.source === "binance_futures"
+          ? "BINANCE FUTURES MARK PRICE · PAPER EXECUTION"
+          : "WAITING FOR PRICE SOURCE";
   const chartPath = useMemo(() => {
     const points = state.history;
     if (points.length === 0) return "";

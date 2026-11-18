@@ -23,6 +23,13 @@ BINANCE_REST_URL = os.getenv(
     "BINANCE_REST_URL",
     "https://data-api.binance.vision/api/v3/ticker/price?symbols=%5B%22BTCUSDT%22,%22ETHUSDT%22%5D",
 )
+# Public Kraken spot ticker used when Binance is unavailable from the VM's
+# region. This is an index-price proxy for paper markets, never an execution
+# venue.
+KRAKEN_REST_URL = os.getenv(
+    "KRAKEN_REST_URL",
+    "https://api.kraken.com/0/public/Ticker?pair=XBTUSD,ETHUSD",
+)
 BINANCE_REST_POLL_INTERVAL_SECONDS = float(os.getenv("BINANCE_REST_POLL_INTERVAL_SECONDS", "1"))
 BINANCE_HTTP_TIMEOUT_SECONDS = float(os.getenv("BINANCE_HTTP_TIMEOUT_SECONDS", "10"))
 BINANCE_WS_MESSAGE_TIMEOUT_SECONDS = float(os.getenv("BINANCE_WS_MESSAGE_TIMEOUT_SECONDS", "8"))
@@ -98,6 +105,44 @@ def _fetch_rest_snapshot() -> dict[MARKET, float]:
     return _extract_market_index_prices(payload)
 
 
+def _extract_kraken_prices(payload) -> dict[MARKET, float]:
+    """Read Kraken's public XBT/USD and ETH/USD last-trade ticker values."""
+    if not isinstance(payload, dict) or payload.get("error"):
+        raise ValueError("Kraken ticker response contained an API error")
+    result = payload.get("result")
+    if not isinstance(result, dict):
+        raise ValueError("Kraken ticker response did not contain a result")
+
+    prices: dict[MARKET, float] = {}
+    for pair, ticker in result.items():
+        normalized_pair = pair.upper()
+        market = None
+        if "XBT" in normalized_pair and "USD" in normalized_pair:
+            market = "BTC-PERP"
+        elif "ETH" in normalized_pair and "USD" in normalized_pair:
+            market = "ETH-PERP"
+        if market is None or not isinstance(ticker, dict):
+            continue
+        last_trade = ticker.get("c")
+        raw_price = last_trade[0] if isinstance(last_trade, list) and last_trade else None
+        try:
+            price = float(raw_price)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(price) and price > 0:
+            prices[market] = price
+    return prices
+
+
+def _fetch_kraken_snapshot() -> dict[MARKET, float]:
+    with urlopen(KRAKEN_REST_URL, timeout=BINANCE_HTTP_TIMEOUT_SECONDS) as response:
+        payload = json.load(response)
+    prices = _extract_kraken_prices(payload)
+    if not prices:
+        raise ValueError("Kraken ticker response contained no supported BTC/USD or ETH/USD price")
+    return prices
+
+
 async def _listen_binance_websocket():
     async with websockets.connect(BINANCE_WS) as ws:
         while True:
@@ -110,45 +155,45 @@ async def _listen_binance_websocket():
 
 
 async def _poll_rest_forever():
-    logger.warning("binance futures websocket unavailable; polling the public market-data endpoint")
-    logged_first_snapshot = False
-    logged_first_request = False
+    logger.warning("Binance futures websocket unavailable; trying public Binance and Kraken spot tickers")
+    logged_binance_snapshot = False
+    logged_kraken_snapshot = False
     logged_451 = False
     while True:
         try:
-            if not logged_first_request:
-                logger.info("requesting public Binance spot prices as the simulator index fallback")
-                logged_first_request = True
             market_index_prices = await asyncio.to_thread(_fetch_rest_snapshot)
             if not market_index_prices:
                 raise ValueError("ticker response contained no supported BTCUSDT or ETHUSDT price")
             await _publish_market_index_prices(market_index_prices, source="binance_spot")
-            if market_index_prices and not logged_first_snapshot:
+            if not logged_binance_snapshot:
                 logger.info(
-                    "public Binance market-data fallback is publishing prices: %s",
+                    "public Binance spot ticker is publishing index prices: %s",
                     market_index_prices,
                 )
-                logged_first_snapshot = True
+                logged_binance_snapshot = True
         except HTTPError as exc:
             if exc.code == 451:
                 if not logged_451:
-                    body = exc.read(512).decode("utf-8", errors="replace").strip()
                     logger.error(
                         "Binance public market-data endpoint returned HTTP 451; "
-                        "prices are unavailable from this server location: %s",
-                        body or "no response body",
+                        "trying Kraken's public spot ticker instead"
                     )
                     logged_451 = True
-                await _publish_simulated_prices()
-                await asyncio.sleep(BINANCE_REST_POLL_INTERVAL_SECONDS)
-                continue
-            logger.warning("binance public market-data request failed with HTTP %s", exc.code)
         except Exception as exc:
             logger.warning(
-                "binance public market-data request failed (%s); retrying",
+                "Binance public market-data request failed (%s); trying Kraken",
                 type(exc).__name__,
             )
-        await _publish_simulated_prices()
+
+        try:
+            market_index_prices = await asyncio.to_thread(_fetch_kraken_snapshot)
+            await _publish_market_index_prices(market_index_prices, source="kraken_spot")
+            if not logged_kraken_snapshot:
+                logger.info("public Kraken spot ticker is publishing index prices: %s", market_index_prices)
+                logged_kraken_snapshot = True
+        except Exception as exc:
+            logger.warning("Kraken public market-data request failed (%s); using configured simulator fallback", type(exc).__name__)
+            await _publish_simulated_prices()
         await asyncio.sleep(BINANCE_REST_POLL_INTERVAL_SECONDS)
 
 
